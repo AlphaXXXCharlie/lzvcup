@@ -171,14 +171,61 @@ def main():
 
     for instance_file_str in args.instances:
         instance_file_path = Path(instance_file_str)
-        instance_base_name = instance_file_path.stem
+        instance_base_name = instance_file_path.stem # Gets filename without extension
         print(f"\n--- Processing Instance: {instance_file_path.name} ---")
 
-        # Placeholder calls
-        clingo_raw_output = solve_with_api(Path(args.model), instance_file_path, args.timeout)
-        rounds_data = parse_schedule_from_clingo_output(clingo_raw_output)
-        write_calendar_to_file(rounds_data, Path(args.output), instance_base_name)
-        compute_and_print_metrics(rounds_data, 0) # num_teams is placeholder
+        # --- Start: Logic to parse 'n' from instance file ---
+        num_teams_for_metrics = 16 # Default if n cannot be parsed
+        try:
+            with open(instance_file_path, 'r') as f_inst:
+                content = f_inst.read()
+                n_match = re.search(r"#const\s+n\s*=\s*(\d+)\.", content)
+                if n_match:
+                    num_teams_for_metrics = int(n_match.group(1))
+                    print(f"[INFO] Parsed n={num_teams_for_metrics} from {instance_file_path.name} for Python-side metrics.")
+                else:
+                    print(f"[WARNING] Could not find '#const n = ...' in {instance_file_path.name}. Using default n={num_teams_for_metrics} for Python-side metrics.")
+        except FileNotFoundError:
+             # This case is already caught below, but good to handle parsing error specifically
+             print(f"[ERROR] Instance file not found during n parsing: {instance_file_path.name}")
+             # Keep default num_teams_for_metrics
+        except Exception as e:
+            print(f"[WARNING] Error reading or parsing n from {instance_file_path.name}: {e}. Using default n={num_teams_for_metrics} for Python-side metrics.")
+        # --- End: Logic to parse 'n' ---
+
+
+        try:
+            clingo_raw_output = solve_with_api(
+                asp_model_path=Path(args.model),
+                instance_file_path=instance_file_path,
+                timeout_seconds=args.timeout
+            )
+
+            # Check for effectively empty output, not just string == ""
+            if not clingo_raw_output.strip() and not "No solution found" in clingo_raw_output : # Check if effectively empty
+                 print("[WARNING] Clingo solve_with_api returned empty or no effective output. Calendar will likely be empty.")
+
+            rounds_data = parse_schedule_from_clingo_output(clingo_raw_output)
+
+            write_calendar_to_file(
+                rounds_dict=rounds_data,
+                output_dir_path=Path(args.output),
+                instance_base_name=instance_base_name
+            )
+
+            # Pass the parsed num_teams to the metrics function
+            compute_and_print_metrics(rounds_data, num_teams_for_metrics)
+
+        except FileNotFoundError as e:
+             print(f"[ERROR] A required file was not found: {e}")
+        except RuntimeError as e: # Catch Clingo-specific runtime errors
+            print(f"[ERROR] Clingo processing failed for {instance_file_path.name}: {e}")
+        except Exception as e:
+            print(f"[ERROR] An unexpected error occurred while processing {instance_file_path.name}: {e}")
+            # Removed traceback for conciseness in this output, will add back in a polishing step
+            # import traceback
+            # traceback.print_exc()
+
 
 if __name__ == "__main__":
     main()
