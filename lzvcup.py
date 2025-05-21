@@ -65,9 +65,20 @@ def solve_with_api(asp_model_path, instance_file_path, timeout_seconds):
     return best_model_atoms_str
 
 def parse_schedule_from_clingo_output(clingo_output_str):
-    """Placeholder for parsing."""
-    print("[INFO] parse_schedule_from_clingo_output called (placeholder)")
-    return {}
+    """
+    Parses the raw Clingo output string to extract the schedule.
+    Returns a dictionary of rounds, where each round is a list of (home, away) tuples.
+    """
+    rounds = {}
+    for match_obj in MATCH_RE.finditer(clingo_output_str):
+        r, h, a = map(int, match_obj.groups())
+        rounds.setdefault(r, []).append((h, a))
+
+    if not rounds and clingo_output_str.strip():
+        print("[WARNING] parse_schedule_from_clingo_output found no 'match/3' atoms in non-empty Clingo output.")
+    elif not rounds:
+        print("[DEBUG] parse_schedule_from_clingo_output is returning an empty rounds dictionary (Clingo output might have been effectively empty of matches).")
+    return rounds
 
 def write_calendar_to_file(rounds_dict, output_dir_path, instance_base_name):
     """Placeholder for writing."""
