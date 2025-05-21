@@ -81,8 +81,23 @@ def parse_schedule_from_clingo_output(clingo_output_str):
     return rounds
 
 def write_calendar_to_file(rounds_dict, output_dir_path, instance_base_name):
-    """Placeholder for writing."""
-    print("[INFO] write_calendar_to_file called (placeholder)")
+    """
+    Writes the parsed schedule to a calendar file.
+    """
+    calendar_file = Path(output_dir_path) / f"{instance_base_name}_calendar.txt"
+
+    print(f"[INFO] Writing calendar to: {calendar_file}")
+    with open(calendar_file, "w") as f:
+        if not rounds_dict:
+            f.write("No schedule generated or no matches found.\n")
+            print("[WARNING] Calendar file written with no schedule data because no rounds were parsed.")
+            return
+
+        for r_num in sorted(rounds_dict.keys()):
+            # Sort matches within a round for consistent output, e.g., by home team
+            sorted_matches = sorted(rounds_dict[r_num], key=lambda x: x[0])
+            matches_str = ", ".join(f"{h}@{a}" for h, a in sorted_matches)
+            f.write(f"Round {r_num}: {matches_str}\n")
 
 def compute_and_print_metrics(rounds_dict, num_teams):
     """Placeholder for metrics."""
