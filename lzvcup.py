@@ -100,8 +100,51 @@ def write_calendar_to_file(rounds_dict, output_dir_path, instance_base_name):
             f.write(f"Round {r_num}: {matches_str}\n")
 
 def compute_and_print_metrics(rounds_dict, num_teams):
-    """Placeholder for metrics."""
-    print("[INFO] compute_and_print_metrics called (placeholder)")
+    """
+    Computes and prints basic metrics for the generated schedule.
+    """
+    if not rounds_dict:
+        print("[INFO] No schedule data to compute metrics for.")
+        print("Violations (team plays/round): N/A (no schedule)")
+        print("Consecutive home series: N/A, away series: N/A (no schedule)")
+        return
+
+    violations = 0
+    for r_num, matches_in_round in rounds_dict.items():
+        team_play_counts = {t: 0 for t in range(1, num_teams + 1)}
+        for h_team, a_team in matches_in_round:
+            # Added safety checks for team IDs being within the expected range
+            if 1 <= h_team <= num_teams: team_play_counts[h_team] += 1
+            if 1 <= a_team <= num_teams: team_play_counts[a_team] += 1
+
+        for team_id in range(1, num_teams + 1):
+            # Used .get for robustness if a team somehow isn't in counts (shouldn't happen with valid data, but good practice)
+            if team_play_counts.get(team_id, 0) != 1:
+                violations += 1
+                print(f"[DEBUG Metric Violation] Team {team_id} plays {team_play_counts.get(team_id, 0)} times in round {r_num}.")
+    print(f"Violations (each team should play once per round): {violations} instances")
+
+    consecutive_home = 0
+    consecutive_away = 0
+    team_schedules_ha = {t: [] for t in range(1, num_teams + 1)}
+
+    for r_num in sorted(rounds_dict.keys()):
+        for h_team, a_team in rounds_dict[r_num]:
+             # Added safety checks for team IDs being within the expected range
+            if 1 <= h_team <= num_teams: team_schedules_ha[h_team].append("H")
+            if 1 <= a_team <= num_teams: team_schedules_ha[a_team].append("A")
+
+    for team_id in range(1, num_teams + 1):
+        schedule_sequence = team_schedules_ha.get(team_id, []) # Used .get for robustness
+        for i in range(len(schedule_sequence) - 1):
+            if schedule_sequence[i] == "H" and schedule_sequence[i+1] == "H":
+                consecutive_home += 1
+            elif schedule_sequence[i] == "A" and schedule_sequence[i+1] == "A":
+                consecutive_away += 1
+
+    print(f"Consecutive home series: {consecutive_home}")
+    print(f"Consecutive away series: {consecutive_away}")
+
 
 # --- Main Execution (Minimal) ---
 def main():
