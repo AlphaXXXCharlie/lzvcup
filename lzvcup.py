@@ -17,10 +17,52 @@ DEFAULT_ASP_MODEL_FILE = SCRIPT_DIR / "schedule.lp"
 MATCH_RE = re.compile(r"match\((\d+),(\d+),(\d+)\)")
 
 # --- Core Functions (Placeholders) ---
+
+# --- Core Functions ---
 def solve_with_api(asp_model_path, instance_file_path, timeout_seconds):
-    """Placeholder for Clingo solving logic."""
-    print("[INFO] solve_with_api called (placeholder)")
-    return ""
+    """
+    Solves the ASP problem using the Clingo API.
+    Returns the raw string output of the best model's shown atoms.
+    """
+    ctl = clingo.Control([
+        f"--opt-mode=optN", # Find a sequence of optimal models
+        f"--solve-limit={timeout_seconds * 1000}" # Clingo timeout
+    ])
+
+    print(f"[INFO] Loading ASP model from: {asp_model_path}")
+    if not asp_model_path.exists():
+        print(f"[ERROR] ASP model file not found at: {asp_model_path}")
+        raise FileNotFoundError(f"ASP model file not found: {asp_model_path}")
+    ctl.load(str(asp_model_path))
+
+    print(f"[INFO] Loading instance file: {instance_file_path}")
+    if not instance_file_path.exists():
+        print(f"[ERROR] Instance file not found at: {instance_file_path}")
+        raise FileNotFoundError(f"Instance file not found: {instance_file_path}")
+    ctl.load(str(instance_file_path))
+
+    print("[INFO] Grounding the ASP program...")
+    ctl.ground([("base", [])])
+
+    best_model_atoms_str = ""
+    best_model_found = False
+
+    print("[INFO] Starting Clingo solve process...")
+    with ctl.solve(yield_=True) as handle:
+        for model in handle:
+            best_model_found = True
+            print(f"[DEBUG] Clingo found a model. Optimality: {model.optimality_proven}, Atoms: {model.symbols(shown=True)}")
+            # Keep the atoms of the latest (most optimal) model
+            current_model_atoms = list(model.symbols(shown=True))
+            best_model_atoms_str = "\n".join(str(s) for s in current_model_atoms)
+
+    if not best_model_found:
+        print("[ERROR] Clingo reported no solution (no models yielded).")
+
+        return ""
+
+    print(f"[DEBUG] Raw output string from best model for parsing:\n---\n{best_model_atoms_str}\n---")
+    return best_model_atoms_str
 
 def parse_schedule_from_clingo_output(clingo_output_str):
     """Placeholder for parsing."""
