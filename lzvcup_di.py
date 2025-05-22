@@ -11,7 +11,7 @@ import sys
 import clingo
 from pathlib import Path
 import traceback
-import json # Import json module
+import json
 
 # --- Configuration ---
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -146,12 +146,25 @@ def write_calendar_to_file(rounds_dict, output_dir_path, instance_base_name):
             matches_str = ", ".join(f"{h}@{a}" for h, a in sorted_matches)
             f.write(f"Round {r_num}: {matches_str}\n")
 
-# compute_and_print_metrics is now compute_and_print_detailed_metrics
+# compute_and_print_metrics is now compute_and_print_detailed_metrics - MODIFIED TO RETURN METRICS
 def compute_and_print_detailed_metrics(rounds_dict, num_teams, clingo_solve_result):
     """
     Computes and prints detailed metrics for the generated schedule.
     Also reports Clingo solver outcome information.
+    Returns a dictionary of computed metrics.
     """
+    # --- Start: Prepare dictionary to return ---
+    metrics = {
+        "violations_play_once": 0,
+        "consecutive_home_2": 0,
+        "consecutive_away_2": 0,
+        "consecutive_home_3": 0,
+        "consecutive_away_3": 0,
+        "total_imbalance": 0
+    }
+    # --- End: Prepare dictionary to return ---
+
+
     print("\n--- Solution Quality Metrics ---")
     if clingo_solve_result.get("status") not in ["MODEL_FOUND", "TIMEOUT_WITH_MODEL", "OPTIMAL_SOLUTION_FOUND"]:
         print("Metrics: N/A (No valid schedule data due to solver status).")
@@ -159,13 +172,14 @@ def compute_and_print_detailed_metrics(rounds_dict, num_teams, clingo_solve_resu
         if "message" in clingo_solve_result and clingo_solve_result["message"]: print(f"Message: {clingo_solve_result['message']}")
         if clingo_solve_result.get("status") in ["MODEL_FOUND", "TIMEOUT_WITH_MODEL", "OPTIMAL_SOLUTION_FOUND"] and not rounds_dict:
              print("[WARNING] Solver reported a model status but no schedule data was parsed.")
-        return
+        return metrics # Return the initialized metrics dictionary on failure
+
 
     print(f"Clingo Optimality Proven: {clingo_solve_result.get('optimality_proven', False)}")
     print(f"Clingo Solution Cost (by priority levels): {clingo_solve_result.get('cost', [])}")
 
     # Hard Constraint - Team plays once per round violations
-    violations_play_once = 0
+    violations_play_once = 0 # Calculate for printing
     for r_num, matches_in_round in rounds_dict.items():
         team_play_counts = {t: 0 for t in range(1, num_teams + 1)}
         for h_team, a_team in matches_in_round:
@@ -174,7 +188,8 @@ def compute_and_print_detailed_metrics(rounds_dict, num_teams, clingo_solve_resu
         for team_id in range(1, num_teams + 1):
             if team_play_counts.get(team_id, 0) != 1:
                 violations_play_once += 1
-    print(f"Hard Constraint - Team plays once per round violations: {violations_play_once} instances")
+    metrics["violations_play_once"] = violations_play_once # Store in metrics dict
+    print(f"Hard Constraint - Team plays once per round violations: {metrics['violations_play_once']} instances")
 
 
     # Refined Consecutive Game Counting (Exact 2 and 3+)
@@ -200,15 +215,18 @@ def compute_and_print_detailed_metrics(rounds_dict, num_teams, clingo_solve_resu
                 if seq[i] == "H": consecutive_home_3_count_triplets += 1
                 else: consecutive_away_3_count_triplets += 1
 
-    consecutive_home_2_exact = consecutive_home_2_count_temp - consecutive_home_3_count_triplets * 2
-    consecutive_away_2_exact = consecutive_away_2_count_temp - consecutive_away_3_count_triplets * 2
-    consecutive_home_3_plus = consecutive_home_3_count_triplets
-    consecutive_away_3_plus = consecutive_away_3_count_triplets
+    # Store refined counts in metrics dict
+    metrics["consecutive_home_3"] = consecutive_home_3_count_triplets
+    metrics["consecutive_away_3"] = consecutive_away_3_count_triplets
+    # Calculate and store exact 2 counts
+    metrics["consecutive_home_2"] = consecutive_home_2_count_temp - metrics["consecutive_home_3"] * 2
+    metrics["consecutive_away_2"] = consecutive_away_2_count_temp - metrics["consecutive_away_3"] * 2
 
-    print(f"Soft: Occurrences of exactly 2 consecutive home games: {consecutive_home_2_exact}")
-    print(f"Soft: Occurrences of exactly 2 consecutive away games: {consecutive_away_2_exact}")
-    print(f"Soft: Occurrences of 3+ consecutive home games: {consecutive_home_3_plus}")
-    print(f"Soft: Occurrences of 3+ consecutive away games: {consecutive_away_3_plus}")
+
+    print(f"Soft: Occurrences of exactly 2 consecutive home games: {metrics['consecutive_home_2']}")
+    print(f"Soft: Occurrences of exactly 2 consecutive away games: {metrics['consecutive_away_2']}")
+    print(f"Soft: Occurrences of 3+ consecutive home games: {metrics['consecutive_home_3']}")
+    print(f"Soft: Occurrences of 3+ consecutive away games: {metrics['consecutive_away_3']}")
 
     # H/A Balance Metric
     total_imbalance = 0
@@ -217,12 +235,16 @@ def compute_and_print_detailed_metrics(rounds_dict, num_teams, clingo_solve_resu
         h_total = seq.count("H")
         a_total = seq.count("A")
         total_imbalance += abs(h_total - a_total)
-    print(f"Soft: Sum of absolute H/A imbalance over all teams: {total_imbalance}")
+    metrics["total_imbalance"] = total_imbalance # Store in metrics dict
+    print(f"Soft: Sum of absolute H/A imbalance over all teams: {metrics['total_imbalance']}")
 
     print("Note: Metrics for 2-consecutive are approximate if 3+ exist; Clingo costs are the ground truth from the ASP.")
 
+    return metrics # --- Return the computed metrics dictionary ---
+
 
 # --- Main Execution ---
+# The main function will be updated in the next commit to capture and use the returned metrics
 def main():
     parser = argparse.ArgumentParser(description="Generates LZV Cup schedules using Clingo (DI Version).")
     parser.add_argument("-i", "--instances", nargs="+", required=True, help="Path to instance .lp file(s).")
@@ -230,7 +252,6 @@ def main():
     parser.add_argument("-t", "--timeout", type=int, default=300, help="Clingo solver timeout (seconds).")
     parser.add_argument("--model", default=str(DEFAULT_ASP_MODEL_FILE), help=f"ASP model file (default: {DEFAULT_ASP_MODEL_FILE}).")
     parser.add_argument("--clingo-options", type=str, default="", help="Custom options to pass to Clingo (e.g., '--models=0 --opt-strategy=usc,pmres'). Quote if it contains spaces.")
-    # Add the JSON output argument
     parser.add_argument("--json-output", action="store_true", help="Output detailed results in JSON format.")
     args = parser.parse_args()
 
@@ -265,21 +286,22 @@ def main():
             if clingo_solve_result.get("atoms_str"):
                  rounds_data = parse_schedule_from_clingo_output(clingo_solve_result["atoms_str"])
 
-            # Call metrics function to print to console (it doesn't return values yet)
+            # Call metrics function to print to console (it now also returns values)
+            # *** This line will be updated in the next commit to capture the return value ***
             compute_and_print_detailed_metrics(rounds_data, num_teams_for_metrics, clingo_solve_result)
 
-            # Handle JSON output flag
+
+            # Handle JSON output flag (still using placeholders for metrics)
             if args.json_output:
                  json_output_file = Path(args.output) / f"{instance_base_name}_results.json"
                  print(f"[INFO] Writing detailed results to JSON file: {json_output_file}")
-                 # --- Start: Placeholder for building the actual JSON structure ---
                  detailed_results_dict = {
                      "instance": instance_file_path.name,
                      "num_teams": num_teams_for_metrics,
                      "solver_status": clingo_solve_result.get("status", "Unknown"),
                      "optimality_proven": clingo_solve_result.get("optimality_proven", False),
                      "clingo_cost": clingo_solve_result.get("cost", []),
-                     "python_metrics": {
+                     "python_metrics": { # Still placeholder values
                          "violations_play_once": "TODO: Get value from metrics func",
                          "consecutive_home_2": "TODO: Get value from metrics func",
                          "consecutive_away_2": "TODO: Get value from metrics func",
@@ -288,9 +310,8 @@ def main():
                          "total_imbalance": "TODO: Get value from metrics func"
                      },
                      "calendar_file": f"{instance_base_name}_calendar.txt" if rounds_data and clingo_solve_result.get("status") in ["MODEL_FOUND", "TIMEOUT_WITH_MODEL", "OPTIMAL_SOLUTION_FOUND"] else None,
-                     "error_message": clingo_solve_result.get("message") # Include error message if present
+                     "error_message": clingo_solve_result.get("message")
                  }
-                 # --- End: Placeholder for building the actual JSON structure ---
                  with open(json_output_file, "w") as f:
                      json.dump(detailed_results_dict, f, indent=4)
 
@@ -302,16 +323,17 @@ def main():
                      instance_base_name=instance_base_name
                  )
             elif not rounds_data and clingo_solve_result.get("status") not in ["ERROR_GROUNDING", "ERROR_SOLVE_RUNTIME"]:
-                 # Only print this if no rounds were parsed AND the status wasn't a critical error that would prevent parsing
                  print("[INFO] No schedule data to write to calendar file.")
 
 
         except FileNotFoundError as e:
              print(f"[ERROR] A required file was not found: {e}")
              err_result = {"status": "PYTHON_ERROR_FILE_NOT_FOUND", "message": str(e)}
-             compute_and_print_detailed_metrics({}, num_teams_for_metrics, err_result)
+             compute_and_print_detailed_metrics({}, num_teams_for_metrics, err_result) # Call metrics (it returns now)
              if args.json_output:
                  json_output_file = Path(args.output) / f"{instance_base_name}_results.json"
+                 # Need to call metrics function again to get the empty dict on error for JSON
+                 error_metrics = compute_and_print_detailed_metrics({}, num_teams_for_metrics, err_result) # This will print N/A again, bit redundant
                  error_results_dict = {
                      "instance": instance_file_path.name,
                      "num_teams": num_teams_for_metrics,
@@ -319,8 +341,8 @@ def main():
                      "error_message": err_result["message"],
                      "optimality_proven": False,
                      "clingo_cost": [],
-                     "python_metrics": {},
-                     "calendar_file": None # Calendar would not be written
+                     "python_metrics": error_metrics, # Use the returned empty metrics
+                     "calendar_file": None
                  }
                  print(f"[INFO] Writing error details to JSON file: {json_output_file}")
                  with open(json_output_file, "w") as f:
@@ -330,18 +352,20 @@ def main():
             print(f"[ERROR] Clingo processing failed for {instance_file_path.name}: {e}")
             import traceback
             traceback.print_exc()
-            # clingo_solve_result should be populated by solve_with_api in this case, even if it's an error status
-            compute_and_print_detailed_metrics({}, num_teams_for_metrics, clingo_solve_result)
+            # clingo_solve_result should be populated by solve_with_api
+            compute_and_print_detailed_metrics({}, num_teams_for_metrics, clingo_solve_result) # Call metrics (it returns now)
             if args.json_output:
                  json_output_file = Path(args.output) / f"{instance_base_name}_results.json"
+                 # Need to call metrics again to get the empty dict on error for JSON
+                 error_metrics = compute_and_print_detailed_metrics({}, num_teams_for_metrics, clingo_solve_result) # Redundant print
                  error_results_dict = {
                      "instance": instance_file_path.name,
                      "num_teams": num_teams_for_metrics,
                      "solver_status": clingo_solve_result.get("status", "CLINGO_RUNTIME_ERROR"),
                      "error_message": clingo_solve_result.get("message", str(e)),
-                     "optimality_proven": False,
-                     "clingo_cost": clingo_solve_result.get("cost", []), # Might have partial cost
-                     "python_metrics": {},
+                     "optimality_proven": clingo_solve_result.get("optimality_proven", False),
+                     "clingo_cost": clingo_solve_result.get("cost", []),
+                     "python_metrics": error_metrics, # Use the returned empty metrics
                      "calendar_file": None
                  }
                  print(f"[INFO] Writing error details to JSON file: {json_output_file}")
@@ -352,19 +376,20 @@ def main():
             print(f"[FATAL ERROR] Unhandled exception while processing {instance_file_path.name}: {e}")
             import traceback
             traceback.print_exc()
-            # Use the potentially populated clingo_solve_result or a default error status
             if not clingo_solve_result: clingo_solve_result = {"status": "PYTHON_FATAL_ERROR"}
-            compute_and_print_detailed_metrics({}, num_teams_for_metrics, clingo_solve_result)
+            compute_and_print_detailed_metrics({}, num_teams_for_metrics, clingo_solve_result) # Call metrics (it returns now)
             if args.json_output:
                  json_output_file = Path(args.output) / f"{instance_base_name}_results.json"
+                 # Need to call metrics again to get the empty dict on error for JSON
+                 error_metrics = compute_and_print_detailed_metrics({}, num_teams_for_metrics, clingo_solve_result) # Redundant print
                  error_results_dict = {
                      "instance": instance_file_path.name,
                      "num_teams": num_teams_for_metrics,
                      "solver_status": clingo_solve_result.get("status", "PYTHON_FATAL_ERROR"),
                      "error_message": str(e),
-                     "optimality_proven": clingo_solve_result.get("optimality_proven", False), # Could be False
-                     "clingo_cost": clingo_solve_result.get("cost", []), # Could be empty
-                     "python_metrics": {},
+                     "optimality_proven": clingo_solve_result.get("optimality_proven", False),
+                     "clingo_cost": clingo_solve_result.get("cost", []),
+                     "python_metrics": error_metrics, # Use the returned empty metrics
                      "calendar_file": None
                  }
                  print(f"[INFO] Writing error details to JSON file: {json_output_file}")
