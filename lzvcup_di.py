@@ -10,8 +10,7 @@ import os
 import sys
 import clingo
 from pathlib import Path
-import traceback
-import json
+import json # Ensure json is imported
 
 # --- Configuration ---
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -22,7 +21,7 @@ MATCH_RE = re.compile(r"match\((\d+),(\d+),(\d+)\)")
 def solve_with_api(asp_model_path, instance_file_path, timeout_seconds, clingo_options_str=None):
     """
     Solves the ASP problem using the Clingo API.
-    Returns a dictionary with 'atoms_str', 'cost', 'optimality_proven', 'status', and 'message' if applicable.
+    Returns a dictionary with 'atoms_str', 'cost', 'optimality_proven', 'status'.
     """
     clingo_default_opts = [
         f"--opt-mode=optN", # Find a sequence of optimal models
@@ -60,9 +59,8 @@ def solve_with_api(asp_model_path, instance_file_path, timeout_seconds, clingo_o
         "atoms_str": "",
         "cost": [],
         "optimality_proven": False,
-        "status": "NO_SOLUTION_FOUND",
-        "models_found": 0,
-        "message": None
+        "status": "NO_SOLUTION_FOUND", # Default status
+        "models_found": 0
     }
 
     print(f"[INFO] Starting Clingo solve process with options: {final_clingo_opts}...")
@@ -71,12 +69,12 @@ def solve_with_api(asp_model_path, instance_file_path, timeout_seconds, clingo_o
         with ctl.solve(yield_=True) as handle:
             for model in handle:
                 current_model_count += 1
-                result["status"] = "MODEL_FOUND"
+                result["status"] = "MODEL_FOUND" # At least one model found
                 result["optimality_proven"] = model.optimality_proven
-                result["cost"] = list(model.cost)
+                result["cost"] = list(model.cost) # Ensure it's a list
 
                 current_model_atoms = list(model.symbols(shown=True))
-                result["atoms_str"] = "\n".join(str(s) for s in current_model_atoms)
+                result["atoms_str"] = "\n".join(str(s) for s in current_model_atoms) # Keep the latest
 
                 print(f"[DEBUG] Model {current_model_count}: Cost={model.cost}, Optimal={model.optimality_proven}, Atoms(sample): {current_model_atoms[:5]}...")
                 if model.optimality_proven:
@@ -84,42 +82,32 @@ def solve_with_api(asp_model_path, instance_file_path, timeout_seconds, clingo_o
 
 
         result["models_found"] = current_model_count
-        if current_model_count == 0:
+        if current_model_count == 0: # No models yielded at all
              print("[WARNING] Clingo solve handle yielded no models.")
              result["status"] = "NO_SOLUTION_FOUND_HANDLE_EMPTY"
 
-        solve_result_status = handle.get()
-        if solve_result_status.optimal:
-             result["status"] = "OPTIMAL_SOLUTION_FOUND"
-        elif solve_result_status.timeout:
-             if result["status"].startswith("NO_SOLUTION"):
-                  result["status"] = "TIMEOUT_NO_MODEL"
-             else:
-                  result["status"] = "TIMEOUT_WITH_MODEL"
-             print(f"[INFO] Clingo solve process timed out ({timeout_seconds}s).")
-        elif solve_result_status.unsatisfiable:
-             result["status"] = "UNSATISFIABLE"
-             print("[INFO] Problem is unsatisfiable.")
 
-
-    except RuntimeError as e:
+    except RuntimeError as e: # Catch Clingo runtime errors during solve
         print(f"[ERROR] Clingo solve process runtime error: {e}")
         result["status"] = "ERROR_SOLVE_RUNTIME"
         result["message"] = str(e)
-        result["atoms_str"] = ""
-        result["cost"] = []
-        result["models_found"] = 0
-        return result
+        return result # Early exit on critical solve error
 
-    if result["status"] in ["MODEL_FOUND", "TIMEOUT_WITH_MODEL", "OPTIMAL_SOLUTION_FOUND"]:
+    if result["status"] == "MODEL_FOUND": # Check if we found at least one model
         print(f"[INFO] Clingo finished. {result['models_found']} model(s) processed.")
         print(f"[INFO] Final selected model - Cost: {result['cost']}, Optimal Proven: {result['optimality_proven']}")
-    elif result["status"] == "TIMEOUT_NO_MODEL":
-        print(f"[WARNING] Clingo process timed out ({timeout_seconds}s). No models found within the limit.")
-    elif result["status"] == "UNSATISFIABLE":
-        print("[INFO] Clingo process finished. Problem is unsatisfiable. No models found.")
     elif result["status"].startswith("NO_SOLUTION"):
-         print(f"[WARNING] Clingo process finished. Status: {result['status']}. No models found.")
+        # Check if timeout occurred based on solve handle status, not just heuristic
+        solve_result_status = handle.get()
+        if solve_result_status.timeout:
+             result["status"] = "TIMEOUT_NO_MODEL"
+             print(f"[WARNING] Clingo process timed out ({timeout_seconds}s). No models found within the limit.")
+        elif solve_result_status.unsatisfiable:
+             result["status"] = "UNSATISFIABLE"
+             print("[INFO] Clingo process finished. Problem is unsatisfiable. No models found.")
+        else: # General no solution status
+             print(f"[WARNING] Clingo process finished. Status: {result['status']}. No models found.")
+    # If status is ERROR_*, messages are printed earlier and returned directly
 
     return result
 
@@ -131,11 +119,12 @@ def parse_schedule_from_clingo_output(clingo_output_str):
 
     if not rounds and clingo_output_str.strip():
         print("[WARNING] parse_schedule: Found no 'match/3' atoms in non-empty Clingo output.")
+    elif not rounds:
+         print("[DEBUG] parse_schedule: is returning an empty rounds dictionary (Clingo output might have been effectively empty of matches).") # Keep debug message
     return rounds
 
 def write_calendar_to_file(rounds_dict, output_dir_path, instance_base_name):
     calendar_file = Path(output_dir_path) / f"{instance_base_name}_calendar.txt"
-
     print(f"[INFO] Writing calendar to: {calendar_file}")
     with open(calendar_file, "w") as f:
         if not rounds_dict:
@@ -146,7 +135,6 @@ def write_calendar_to_file(rounds_dict, output_dir_path, instance_base_name):
             matches_str = ", ".join(f"{h}@{a}" for h, a in sorted_matches)
             f.write(f"Round {r_num}: {matches_str}\n")
 
-# compute_and_print_metrics is now compute_and_print_detailed_metrics
 def compute_and_print_detailed_metrics(rounds_dict, num_teams, clingo_solve_result):
     """
     Computes and prints detailed metrics for the generated schedule.
@@ -162,13 +150,13 @@ def compute_and_print_detailed_metrics(rounds_dict, num_teams, clingo_solve_resu
         "total_imbalance": 0
     }
 
-
     print("\n--- Solution Quality Metrics ---")
-    if clingo_solve_result.get("status") not in ["MODEL_FOUND", "TIMEOUT_WITH_MODEL", "OPTIMAL_SOLUTION_FOUND"]:
-        print("Metrics: N/A (No valid schedule data due to solver status).")
+    # Check if we have data *to compute metrics from*, which requires rounds_dict AND a status that implies a model was parsed
+    if clingo_solve_result.get("status") not in ["MODEL_FOUND", "TIMEOUT_WITH_MODEL", "OPTIMAL_SOLUTION_FOUND", "TIMEOUT_LIKELY"] or not rounds_dict: # Added TIMEOUT_LIKELY to allow metrics on suboptimal timeouts
+        print("Metrics: N/A (No valid schedule data due to solver status or empty rounds).")
         print(f"Solver Status: {clingo_solve_result.get('status', 'Unknown')}")
         if "message" in clingo_solve_result and clingo_solve_result["message"]: print(f"Message: {clingo_solve_result['message']}")
-        if clingo_solve_result.get("status") in ["MODEL_FOUND", "TIMEOUT_WITH_MODEL", "OPTIMAL_SOLUTION_FOUND"] and not rounds_dict:
+        if clingo_solve_result.get("status") in ["MODEL_FOUND", "TIMEOUT_WITH_MODEL", "OPTIMAL_SOLUTION_FOUND", "TIMEOUT_LIKELY"] and not rounds_dict:
              print("[WARNING] Solver reported a model status but no schedule data was parsed.")
         return metrics # Return the initialized metrics dictionary on failure
 
@@ -186,6 +174,7 @@ def compute_and_print_detailed_metrics(rounds_dict, num_teams, clingo_solve_resu
         for team_id in range(1, num_teams + 1):
             if team_play_counts.get(team_id, 0) != 1:
                 violations_play_once += 1
+                # print(f"[DEBUG Metric Violation] Team {team_id} plays {team_play_counts.get(team_id, 0)} times in round {r_num}.") # Removed redundant debug print
     metrics["violations_play_once"] = violations_play_once # Store in metrics dict
     print(f"Hard Constraint - Team plays once per round violations: {metrics['violations_play_once']} instances")
 
@@ -269,12 +258,12 @@ def main():
         except Exception as e:
             print(f"[WARNING] Error reading n: {e}. Using default n={num_teams_for_metrics} for metrics.")
 
-        clingo_solve_result = {}
-        rounds_data = {} # Initialize rounds_data and detailed_metrics before try/except
-        detailed_metrics = {}
-
+        clingo_solve_result = {} # Initialize before try block
+        rounds_data = {} # Initialize rounds_data before try block
+        detailed_metrics = {} # Initialize metrics before try block
 
         try:
+            # Call solve_with_api and capture the result dictionary
             clingo_solve_result = solve_with_api(
                 asp_model_path=Path(args.model),
                 instance_file_path=instance_file_path,
@@ -282,12 +271,12 @@ def main():
                 clingo_options_str=args.clingo_options
             )
 
+            # Only attempt parsing if the solver returned atoms
             if clingo_solve_result.get("atoms_str"):
                  rounds_data = parse_schedule_from_clingo_output(clingo_solve_result["atoms_str"])
 
-            # --- FIX: Capture the returned metrics dictionary ---
+            # Call metrics function ONCE and capture the returned dictionary
             detailed_metrics = compute_and_print_detailed_metrics(rounds_data, num_teams_for_metrics, clingo_solve_result)
-            # --- End FIX ---
 
             # Write calendar ONLY if we successfully parsed some rounds AND the solver found a model
             if rounds_data and clingo_solve_result.get("status") in ["MODEL_FOUND", "TIMEOUT_WITH_MODEL", "OPTIMAL_SOLUTION_FOUND"]:
@@ -296,38 +285,33 @@ def main():
                      output_dir_path=Path(args.output),
                      instance_base_name=instance_base_name
                  )
-            elif not rounds_data and clingo_solve_result.get("status") not in ["ERROR_GROUNDING", "ERROR_SOLVE_RUNTIME"]:
-                 print("[INFO] No schedule data to write to calendar file.")
-
+            # No else printing here, write_calendar_to_file handles the empty case message
 
         except FileNotFoundError as e:
              print(f"[ERROR] A required file was not found: {e}")
              err_result = {"status": "PYTHON_ERROR_FILE_NOT_FOUND", "message": str(e)}
-             # --- FIX: Call metrics function ONCE and capture return ---
-             detailed_metrics = compute_and_print_detailed_metrics({}, num_teams_for_metrics, err_result)
-             clingo_solve_result.update(err_result) # Update clingo_solve_result with error info for JSON
-             # --- End FIX ---
+             clingo_solve_result.update(err_result) # Add error info to result dict
+             # Call metrics with empty data and the error result
+             detailed_metrics = compute_and_print_detailed_metrics({}, num_teams_for_metrics, clingo_solve_result)
 
         except RuntimeError as e:
             print(f"[ERROR] Clingo processing failed for {instance_file_path.name}: {e}")
             import traceback
             traceback.print_exc()
-            # clingo_solve_result should be populated by solve_with_api in this case, even if it's an error status
-            # --- FIX: Call metrics function ONCE and capture return ---
+            # clingo_solve_result should be populated by solve_with_api in this case
+            # Call metrics with empty data and the error result
             detailed_metrics = compute_and_print_detailed_metrics({}, num_teams_for_metrics, clingo_solve_result)
-            # --- End FIX ---
 
         except Exception as e:
             print(f"[FATAL ERROR] Unhandled exception while processing {instance_file_path.name}: {e}")
             import traceback
             traceback.print_exc()
             if not clingo_solve_result: clingo_solve_result = {"status": "PYTHON_FATAL_ERROR"}
-             # --- FIX: Call metrics function ONCE and capture return ---
+            clingo_solve_result["message"] = clingo_solve_result.get("message", str(e)) # Add exception message if not already present
+            # Call metrics with empty data and the error result
             detailed_metrics = compute_and_print_detailed_metrics({}, num_teams_for_metrics, clingo_solve_result)
-             # --- End FIX ---
 
-        # --- Start: JSON Output Block (Moved outside individual excepts) ---
-        # This block runs after the try/except structure finishes for the instance
+        # --- Start: JSON Output Block (After try/except) ---
         if args.json_output:
              json_output_file = Path(args.output) / f"{instance_base_name}_results.json"
              print(f"[INFO] Writing detailed results to JSON file: {json_output_file}")
@@ -339,6 +323,7 @@ def main():
                  "optimality_proven": clingo_solve_result.get("optimality_proven", False),
                  "clingo_cost": clingo_solve_result.get("cost", []),
                  "python_metrics": detailed_metrics, # Use the dictionary returned by the function
+                 # Indicate calendar file only if it was successfully written
                  "calendar_file": f"{instance_base_name}_calendar.txt" if rounds_data and clingo_solve_result.get("status") in ["MODEL_FOUND", "TIMEOUT_WITH_MODEL", "OPTIMAL_SOLUTION_FOUND"] else None,
                  "error_message": clingo_solve_result.get("message") # Include error message in JSON if present
              }
