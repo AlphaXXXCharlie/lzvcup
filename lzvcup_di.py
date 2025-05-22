@@ -123,7 +123,6 @@ def solve_with_api(asp_model_path, instance_file_path, timeout_seconds, clingo_o
 
     return result
 
-# parse_schedule_from_clingo_output remains the same
 def parse_schedule_from_clingo_output(clingo_output_str):
     rounds = {}
     for match_obj in MATCH_RE.finditer(clingo_output_str):
@@ -134,7 +133,6 @@ def parse_schedule_from_clingo_output(clingo_output_str):
         print("[WARNING] parse_schedule: Found no 'match/3' atoms in non-empty Clingo output.")
     return rounds
 
-# write_calendar_to_file remains the same
 def write_calendar_to_file(rounds_dict, output_dir_path, instance_base_name):
     calendar_file = Path(output_dir_path) / f"{instance_base_name}_calendar.txt"
 
@@ -148,8 +146,8 @@ def write_calendar_to_file(rounds_dict, output_dir_path, instance_base_name):
             matches_str = ", ".join(f"{h}@{a}" for h, a in sorted_matches)
             f.write(f"Round {r_num}: {matches_str}\n")
 
-# compute_and_print_metrics is now compute_and_print_detailed_metrics - adding basic reporting
-def compute_and_print_detailed_metrics(rounds_dict, num_teams, clingo_solve_result): # Explicitly include parameter
+# compute_and_print_metrics is now compute_and_print_detailed_metrics
+def compute_and_print_detailed_metrics(rounds_dict, num_teams, clingo_solve_result):
     """
     Computes and prints detailed metrics for the generated schedule.
     Also reports Clingo solver outcome information.
@@ -169,9 +167,30 @@ def compute_and_print_detailed_metrics(rounds_dict, num_teams, clingo_solve_resu
     print(f"Clingo Optimality Proven: {clingo_solve_result.get('optimality_proven', False)}")
     print(f"Clingo Solution Cost (by priority levels): {clingo_solve_result.get('cost', [])}")
 
-    # Placeholder for actual metric calculations
-    print("\n[INFO] Python-side metric calculations will go here.")
-    print("Hard Constraint - Team plays once per round violations: N/A")
+    # --- Start: Implement Hard Constraint - Team plays once per round violations ---
+    violations_play_once = 0
+    # Iterate through rounds from the parsed data
+    for r_num, matches_in_round in rounds_dict.items():
+        team_play_counts = {t: 0 for t in range(1, num_teams + 1)} # Initialize counts for this round
+        # Count how many times each team appears (home or away) in this round
+        for h_team, a_team in matches_in_round:
+            # Ensure team IDs are within the expected range before incrementing count
+            if 1 <= h_team <= num_teams: team_play_counts[h_team] += 1
+            if 1 <= a_team <= num_teams: team_play_counts[a_team] += 1
+
+        # Check if any team did NOT play exactly once in this round
+        for team_id in range(1, num_teams + 1):
+            # Use .get(team_id, 0) to safely access count, defaulting to 0 if team_id isn't in the round's matches
+            if team_play_counts.get(team_id, 0) != 1:
+                violations_play_once += 1 # Increment total violations counter
+                # Optional: Add debug print for specific violations if needed
+                # print(f"[DEBUG Metric Violation] Team {team_id} plays {team_play_counts.get(team_id, 0)} times in round {r_num}.")
+    print(f"Hard Constraint - Team plays once per round violations: {violations_play_once} instances")
+    # --- End: Implement Hard Constraint ---
+
+
+    # Placeholder for actual soft metric calculations
+    print("\n[INFO] Python-side soft metric calculations will go here.")
     print("Soft: Occurrences of exactly 2 consecutive home games: N/A")
     print("Soft: Occurrences of exactly 2 consecutive away games: N/A")
     print("Soft: Occurrences of 3+ consecutive home games: N/A")
@@ -223,10 +242,10 @@ def main():
                  rounds_data = parse_schedule_from_clingo_output(clingo_solve_result["atoms_str"])
 
             # Pass rounds_data (could be empty) and the full clingo_solve_result to the metrics function
-            compute_and_print_detailed_metrics(rounds_data, num_teams_for_metrics, clingo_solve_result) # Pass the result
+            compute_and_print_detailed_metrics(rounds_data, num_teams_for_metrics, clingo_solve_result)
 
             # Write calendar ONLY if we successfully parsed some rounds AND the solver found a model
-            if rounds_data and clingo_solve_result.get("status") in ["MODEL_FOUND", "TIMEOUT_WITH_MODEL", "OPTIMAL_SOLUTION_FOUND"]:
+            if rounds_data and clingo_solve_result.get("status") in ["MODEL_FOUND", "TIMEOUT_WITH_MODEL", "OPTIMAL_SOLUTION_FOUND", "OPTIMAL_SOLUTION_FOUND"]: # Duplicated OPTIMAL_SOLUTION_FOUND, doesn't hurt
                  write_calendar_to_file(
                      rounds_dict=rounds_data,
                      output_dir_path=Path(args.output),
@@ -235,7 +254,6 @@ def main():
             elif not rounds_data:
                  print("[INFO] No schedule data to write to calendar file.")
             # Else, if rounds_data exists but status isn't a "model found" status, we also don't write a calendar file
-            # (e.g., ERROR_GROUNDING might still produce some garbage atoms depending on model, but not a valid schedule)
 
 
         except FileNotFoundError as e:
