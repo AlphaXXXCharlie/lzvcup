@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-lzvcup.py — In‐process Clingo scheduling for LZV Cup.
+lzvcup.py — In‑process Clingo scheduling for LZV Cup.
 Requires: pip install clingo
 """
 
@@ -10,13 +10,13 @@ import os
 import sys
 import clingo
 from pathlib import Path
+import traceback # Import traceback
 
 # --- Configuration ---
 SCRIPT_DIR = Path(__file__).resolve().parent
+
 DEFAULT_ASP_MODEL_FILE = SCRIPT_DIR / "schedule.lp"
 MATCH_RE = re.compile(r"match\((\d+),(\d+),(\d+)\)")
-
-# --- Core Functions (Placeholders) ---
 
 # --- Core Functions ---
 def solve_with_api(asp_model_path, instance_file_path, timeout_seconds):
@@ -113,12 +113,10 @@ def compute_and_print_metrics(rounds_dict, num_teams):
     for r_num, matches_in_round in rounds_dict.items():
         team_play_counts = {t: 0 for t in range(1, num_teams + 1)}
         for h_team, a_team in matches_in_round:
-            # Added safety checks for team IDs being within the expected range
             if 1 <= h_team <= num_teams: team_play_counts[h_team] += 1
             if 1 <= a_team <= num_teams: team_play_counts[a_team] += 1
 
         for team_id in range(1, num_teams + 1):
-            # Used .get for robustness if a team somehow isn't in counts (shouldn't happen with valid data, but good practice)
             if team_play_counts.get(team_id, 0) != 1:
                 violations += 1
                 print(f"[DEBUG Metric Violation] Team {team_id} plays {team_play_counts.get(team_id, 0)} times in round {r_num}.")
@@ -130,12 +128,11 @@ def compute_and_print_metrics(rounds_dict, num_teams):
 
     for r_num in sorted(rounds_dict.keys()):
         for h_team, a_team in rounds_dict[r_num]:
-             # Added safety checks for team IDs being within the expected range
             if 1 <= h_team <= num_teams: team_schedules_ha[h_team].append("H")
             if 1 <= a_team <= num_teams: team_schedules_ha[a_team].append("A")
 
     for team_id in range(1, num_teams + 1):
-        schedule_sequence = team_schedules_ha.get(team_id, []) # Used .get for robustness
+        schedule_sequence = team_schedules_ha.get(team_id, [])
         for i in range(len(schedule_sequence) - 1):
             if schedule_sequence[i] == "H" and schedule_sequence[i+1] == "H":
                 consecutive_home += 1
@@ -145,8 +142,7 @@ def compute_and_print_metrics(rounds_dict, num_teams):
     print(f"Consecutive home series: {consecutive_home}")
     print(f"Consecutive away series: {consecutive_away}")
 
-
-# --- Main Execution (Minimal) ---
+# --- Main Execution ---
 def main():
     parser = argparse.ArgumentParser(description="Generates sports schedules using Clingo.")
     parser.add_argument(
@@ -174,7 +170,6 @@ def main():
         instance_base_name = instance_file_path.stem # Gets filename without extension
         print(f"\n--- Processing Instance: {instance_file_path.name} ---")
 
-        # --- Start: Logic to parse 'n' from instance file ---
         num_teams_for_metrics = 16 # Default if n cannot be parsed
         try:
             with open(instance_file_path, 'r') as f_inst:
@@ -186,12 +181,11 @@ def main():
                 else:
                     print(f"[WARNING] Could not find '#const n = ...' in {instance_file_path.name}. Using default n={num_teams_for_metrics} for Python-side metrics.")
         except FileNotFoundError:
-             # This case is already caught below, but good to handle parsing error specifically
-             print(f"[ERROR] Instance file not found during n parsing: {instance_file_path.name}")
-             # Keep default num_teams_for_metrics
+             # This specific FileNotFoundError is already handled in solve_with_api,
+             # but parsing 'n' might fail for other reasons.
+             print(f"[WARNING] Instance file not found during n parsing attempt: {instance_file_path.name}. Using default n={num_teams_for_metrics}.")
         except Exception as e:
             print(f"[WARNING] Error reading or parsing n from {instance_file_path.name}: {e}. Using default n={num_teams_for_metrics} for Python-side metrics.")
-        # --- End: Logic to parse 'n' ---
 
 
         try:
@@ -201,7 +195,6 @@ def main():
                 timeout_seconds=args.timeout
             )
 
-            # Check for effectively empty output, not just string == ""
             if not clingo_raw_output.strip() and not "No solution found" in clingo_raw_output : # Check if effectively empty
                  print("[WARNING] Clingo solve_with_api returned empty or no effective output. Calendar will likely be empty.")
 
@@ -213,7 +206,6 @@ def main():
                 instance_base_name=instance_base_name
             )
 
-            # Pass the parsed num_teams to the metrics function
             compute_and_print_metrics(rounds_data, num_teams_for_metrics)
 
         except FileNotFoundError as e:
@@ -222,10 +214,8 @@ def main():
             print(f"[ERROR] Clingo processing failed for {instance_file_path.name}: {e}")
         except Exception as e:
             print(f"[ERROR] An unexpected error occurred while processing {instance_file_path.name}: {e}")
-            # Removed traceback for conciseness in this output, will add back in a polishing step
-            # import traceback
-            # traceback.print_exc()
-
+            import traceback # Ensure this is imported
+            traceback.print_exc() # Print the full traceback
 
 if __name__ == "__main__":
     main()
