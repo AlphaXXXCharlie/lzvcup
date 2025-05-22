@@ -210,21 +210,18 @@ def compute_and_print_detailed_metrics(rounds_dict, num_teams, clingo_solve_resu
     print(f"Soft: Occurrences of 3+ consecutive home games: {consecutive_home_3_plus}")
     print(f"Soft: Occurrences of 3+ consecutive away games: {consecutive_away_3_plus}")
 
-    # --- Start: Implement H/A Balance Metric ---
+    # H/A Balance Metric
     total_imbalance = 0
-    # Iterate through each team
     for team_id in range(1, num_teams + 1):
-        # Get the schedule sequence for the team, default to empty list if somehow missing
         seq = team_schedules_ha.get(team_id, [])
-        # Count total home and away games for this team
         h_total = seq.count("H")
         a_total = seq.count("A")
-        # Add the absolute difference to the total imbalance
         total_imbalance += abs(h_total - a_total)
     print(f"Soft: Sum of absolute H/A imbalance over all teams: {total_imbalance}")
-    # --- End: Implement H/A Balance Metric ---
 
+    # --- Add or confirm this clarifying note ---
     print("Note: Metrics for 2-consecutive are approximate if 3+ exist; Clingo costs are the ground truth from the ASP.")
+    # --- End of clarifying note ---
 
 
 # --- Main Execution ---
