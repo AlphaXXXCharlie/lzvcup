@@ -176,40 +176,32 @@ def compute_and_print_detailed_metrics(rounds_dict, num_teams, clingo_solve_resu
                 violations_play_once += 1
     print(f"Hard Constraint - Team plays once per round violations: {violations_play_once} instances")
 
-    # --- Start: Implement Refined Consecutive Game Counting (Exact 2 and 3+) ---
-    consecutive_home_2_count_temp = 0 # Temporary count for any pair (HH, HHH...)
-    consecutive_away_2_count_temp = 0 # Temporary count for any pair (AA, AAA...)
-    consecutive_home_3_count_triplets = 0 # Count for any triplet (HHH, HHHH...)
-    consecutive_away_3_count_triplets = 0 # Count for any triplet (AAA, AAAA...)
+
+    # Refined Consecutive Game Counting (Exact 2 and 3+)
+    consecutive_home_2_count_temp = 0
+    consecutive_away_2_count_temp = 0
+    consecutive_home_3_count_triplets = 0
+    consecutive_away_3_count_triplets = 0
 
     team_schedules_ha = {t: [] for t in range(1, num_teams + 1)}
 
-    for r_num in sorted(rounds_dict.keys()): # Ensure rounds are processed in order
+    for r_num in sorted(rounds_dict.keys()):
         for h_team, a_team in rounds_dict[r_num]:
             if 1 <= h_team <= num_teams: team_schedules_ha[h_team].append("H")
             if 1 <= a_team <= num_teams: team_schedules_ha[a_team].append("A")
 
     for team_id in range(1, num_teams + 1):
         seq = team_schedules_ha.get(team_id, [])
-        # Iterate through the sequence to count pairs and triplets
         for i in range(len(seq)):
-            # Check for pairs (2+ consecutive)
             if i + 1 < len(seq) and seq[i] == seq[i+1]:
                 if seq[i] == "H": consecutive_home_2_count_temp += 1
                 else: consecutive_away_2_count_temp += 1
-            # Check for triplets (3+ consecutive)
             if i + 2 < len(seq) and seq[i] == seq[i+1] == seq[i+2]:
                 if seq[i] == "H": consecutive_home_3_count_triplets += 1
                 else: consecutive_away_3_count_triplets += 1
 
-    # Calculate the count of *exactly 2* consecutive games.
-    # A sequence of HHH contains two HH pairs. A sequence of HHHH contains three HH pairs and two HHH triplets.
-    # Total 2+ pairs = (Num exactly 2 runs * 1) + (Num 3+ runs * 2) + (Num 4+ runs * 3) + ...
-    # Total 3+ triplets = (Num 3+ runs * 1) + (Num 4+ runs * 2) + ...
-    # Num exactly 2 runs = (Total 2+ pairs counted) - 2 * (Total 3+ triplets counted)
     consecutive_home_2_exact = consecutive_home_2_count_temp - consecutive_home_3_count_triplets * 2
     consecutive_away_2_exact = consecutive_away_2_count_temp - consecutive_away_3_count_triplets * 2
-    # The count of 3+ consecutive runs is simply the count of triplets found.
     consecutive_home_3_plus = consecutive_home_3_count_triplets
     consecutive_away_3_plus = consecutive_away_3_count_triplets
 
@@ -217,11 +209,21 @@ def compute_and_print_detailed_metrics(rounds_dict, num_teams, clingo_solve_resu
     print(f"Soft: Occurrences of exactly 2 consecutive away games: {consecutive_away_2_exact}")
     print(f"Soft: Occurrences of 3+ consecutive home games: {consecutive_home_3_plus}")
     print(f"Soft: Occurrences of 3+ consecutive away games: {consecutive_away_3_plus}")
-    # --- End: Implement Refined Consecutive Game Counting ---
 
+    # --- Start: Implement H/A Balance Metric ---
+    total_imbalance = 0
+    # Iterate through each team
+    for team_id in range(1, num_teams + 1):
+        # Get the schedule sequence for the team, default to empty list if somehow missing
+        seq = team_schedules_ha.get(team_id, [])
+        # Count total home and away games for this team
+        h_total = seq.count("H")
+        a_total = seq.count("A")
+        # Add the absolute difference to the total imbalance
+        total_imbalance += abs(h_total - a_total)
+    print(f"Soft: Sum of absolute H/A imbalance over all teams: {total_imbalance}")
+    # --- End: Implement H/A Balance Metric ---
 
-    # Placeholder for H/A balance metric
-    print("Soft: Sum of absolute H/A imbalance over all teams: N/A")
     print("Note: Metrics for 2-consecutive are approximate if 3+ exist; Clingo costs are the ground truth from the ASP.")
 
 
@@ -252,7 +254,7 @@ def main():
         except Exception as e:
             print(f"[WARNING] Error reading n: {e}. Using default n={num_teams_for_metrics} for metrics.")
 
-        clingo_solve_result = {} # Initialize before try block
+        clingo_solve_result = {}
 
         try:
             clingo_solve_result = solve_with_api(
@@ -295,4 +297,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()  
+    main()
