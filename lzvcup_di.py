@@ -11,7 +11,7 @@ import sys
 import clingo
 from pathlib import Path
 import traceback
-# import json # Will be added later for detailed output
+import json # Import json module
 
 # --- Configuration ---
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -219,9 +219,7 @@ def compute_and_print_detailed_metrics(rounds_dict, num_teams, clingo_solve_resu
         total_imbalance += abs(h_total - a_total)
     print(f"Soft: Sum of absolute H/A imbalance over all teams: {total_imbalance}")
 
-    # --- Add or confirm this clarifying note ---
     print("Note: Metrics for 2-consecutive are approximate if 3+ exist; Clingo costs are the ground truth from the ASP.")
-    # --- End of clarifying note ---
 
 
 # --- Main Execution ---
@@ -232,6 +230,8 @@ def main():
     parser.add_argument("-t", "--timeout", type=int, default=300, help="Clingo solver timeout (seconds).")
     parser.add_argument("--model", default=str(DEFAULT_ASP_MODEL_FILE), help=f"ASP model file (default: {DEFAULT_ASP_MODEL_FILE}).")
     parser.add_argument("--clingo-options", type=str, default="", help="Custom options to pass to Clingo (e.g., '--models=0 --opt-strategy=usc,pmres'). Quote if it contains spaces.")
+    # Add the JSON output argument
+    parser.add_argument("--json-output", action="store_true", help="Output detailed results in JSON format.")
     args = parser.parse_args()
 
     Path(args.output).mkdir(parents=True, exist_ok=True)
@@ -265,7 +265,35 @@ def main():
             if clingo_solve_result.get("atoms_str"):
                  rounds_data = parse_schedule_from_clingo_output(clingo_solve_result["atoms_str"])
 
+            # Call metrics function to print to console (it doesn't return values yet)
             compute_and_print_detailed_metrics(rounds_data, num_teams_for_metrics, clingo_solve_result)
+
+            # Handle JSON output flag
+            if args.json_output:
+                 json_output_file = Path(args.output) / f"{instance_base_name}_results.json"
+                 print(f"[INFO] Writing detailed results to JSON file: {json_output_file}")
+                 # --- Start: Placeholder for building the actual JSON structure ---
+                 detailed_results_dict = {
+                     "instance": instance_file_path.name,
+                     "num_teams": num_teams_for_metrics,
+                     "solver_status": clingo_solve_result.get("status", "Unknown"),
+                     "optimality_proven": clingo_solve_result.get("optimality_proven", False),
+                     "clingo_cost": clingo_solve_result.get("cost", []),
+                     "python_metrics": {
+                         "violations_play_once": "TODO: Get value from metrics func",
+                         "consecutive_home_2": "TODO: Get value from metrics func",
+                         "consecutive_away_2": "TODO: Get value from metrics func",
+                         "consecutive_home_3": "TODO: Get value from metrics func",
+                         "consecutive_away_3": "TODO: Get value from metrics func",
+                         "total_imbalance": "TODO: Get value from metrics func"
+                     },
+                     "calendar_file": f"{instance_base_name}_calendar.txt" if rounds_data and clingo_solve_result.get("status") in ["MODEL_FOUND", "TIMEOUT_WITH_MODEL", "OPTIMAL_SOLUTION_FOUND"] else None,
+                     "error_message": clingo_solve_result.get("message") # Include error message if present
+                 }
+                 # --- End: Placeholder for building the actual JSON structure ---
+                 with open(json_output_file, "w") as f:
+                     json.dump(detailed_results_dict, f, indent=4)
+
 
             if rounds_data and clingo_solve_result.get("status") in ["MODEL_FOUND", "TIMEOUT_WITH_MODEL", "OPTIMAL_SOLUTION_FOUND"]:
                  write_calendar_to_file(
@@ -273,24 +301,75 @@ def main():
                      output_dir_path=Path(args.output),
                      instance_base_name=instance_base_name
                  )
-            elif not rounds_data:
+            elif not rounds_data and clingo_solve_result.get("status") not in ["ERROR_GROUNDING", "ERROR_SOLVE_RUNTIME"]:
+                 # Only print this if no rounds were parsed AND the status wasn't a critical error that would prevent parsing
                  print("[INFO] No schedule data to write to calendar file.")
 
 
         except FileNotFoundError as e:
              print(f"[ERROR] A required file was not found: {e}")
-             compute_and_print_detailed_metrics({}, num_teams_for_metrics, {"status": "PYTHON_ERROR_FILE_NOT_FOUND", "message": str(e)})
+             err_result = {"status": "PYTHON_ERROR_FILE_NOT_FOUND", "message": str(e)}
+             compute_and_print_detailed_metrics({}, num_teams_for_metrics, err_result)
+             if args.json_output:
+                 json_output_file = Path(args.output) / f"{instance_base_name}_results.json"
+                 error_results_dict = {
+                     "instance": instance_file_path.name,
+                     "num_teams": num_teams_for_metrics,
+                     "solver_status": err_result["status"],
+                     "error_message": err_result["message"],
+                     "optimality_proven": False,
+                     "clingo_cost": [],
+                     "python_metrics": {},
+                     "calendar_file": None # Calendar would not be written
+                 }
+                 print(f"[INFO] Writing error details to JSON file: {json_output_file}")
+                 with open(json_output_file, "w") as f:
+                     json.dump(error_results_dict, f, indent=4)
+
         except RuntimeError as e:
             print(f"[ERROR] Clingo processing failed for {instance_file_path.name}: {e}")
             import traceback
             traceback.print_exc()
+            # clingo_solve_result should be populated by solve_with_api in this case, even if it's an error status
             compute_and_print_detailed_metrics({}, num_teams_for_metrics, clingo_solve_result)
+            if args.json_output:
+                 json_output_file = Path(args.output) / f"{instance_base_name}_results.json"
+                 error_results_dict = {
+                     "instance": instance_file_path.name,
+                     "num_teams": num_teams_for_metrics,
+                     "solver_status": clingo_solve_result.get("status", "CLINGO_RUNTIME_ERROR"),
+                     "error_message": clingo_solve_result.get("message", str(e)),
+                     "optimality_proven": False,
+                     "clingo_cost": clingo_solve_result.get("cost", []), # Might have partial cost
+                     "python_metrics": {},
+                     "calendar_file": None
+                 }
+                 print(f"[INFO] Writing error details to JSON file: {json_output_file}")
+                 with open(json_output_file, "w") as f:
+                     json.dump(error_results_dict, f, indent=4)
+
         except Exception as e:
             print(f"[FATAL ERROR] Unhandled exception while processing {instance_file_path.name}: {e}")
             import traceback
             traceback.print_exc()
+            # Use the potentially populated clingo_solve_result or a default error status
             if not clingo_solve_result: clingo_solve_result = {"status": "PYTHON_FATAL_ERROR"}
             compute_and_print_detailed_metrics({}, num_teams_for_metrics, clingo_solve_result)
+            if args.json_output:
+                 json_output_file = Path(args.output) / f"{instance_base_name}_results.json"
+                 error_results_dict = {
+                     "instance": instance_file_path.name,
+                     "num_teams": num_teams_for_metrics,
+                     "solver_status": clingo_solve_result.get("status", "PYTHON_FATAL_ERROR"),
+                     "error_message": str(e),
+                     "optimality_proven": clingo_solve_result.get("optimality_proven", False), # Could be False
+                     "clingo_cost": clingo_solve_result.get("cost", []), # Could be empty
+                     "python_metrics": {},
+                     "calendar_file": None
+                 }
+                 print(f"[INFO] Writing error details to JSON file: {json_output_file}")
+                 with open(json_output_file, "w") as f:
+                     json.dump(error_results_dict, f, indent=4)
 
 
 if __name__ == "__main__":
