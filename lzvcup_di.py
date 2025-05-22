@@ -82,6 +82,7 @@ def solve_with_api(asp_model_path, instance_file_path, timeout_seconds, clingo_o
                 if model.optimality_proven:
                     print(f"[INFO] Optimal model found by Clingo at model count {current_model_count}.")
 
+
         result["models_found"] = current_model_count
         if current_model_count == 0:
              print("[WARNING] Clingo solve handle yielded no models.")
@@ -124,10 +125,6 @@ def solve_with_api(asp_model_path, instance_file_path, timeout_seconds, clingo_o
 
 # parse_schedule_from_clingo_output remains the same
 def parse_schedule_from_clingo_output(clingo_output_str):
-    """
-    Parses the raw Clingo output string to extract the schedule.
-    Returns a dictionary of rounds, where each round is a list of (home, away) tuples.
-    """
     rounds = {}
     for match_obj in MATCH_RE.finditer(clingo_output_str):
         r, h, a = map(int, match_obj.groups())
@@ -137,11 +134,8 @@ def parse_schedule_from_clingo_output(clingo_output_str):
         print("[WARNING] parse_schedule: Found no 'match/3' atoms in non-empty Clingo output.")
     return rounds
 
-# write_calendar_to_file remains the same (fixed typo output_dir_dir)
+# write_calendar_to_file remains the same
 def write_calendar_to_file(rounds_dict, output_dir_path, instance_base_name):
-    """
-    Writes the parsed schedule to a calendar file.
-    """
     calendar_file = Path(output_dir_path) / f"{instance_base_name}_calendar.txt"
 
     print(f"[INFO] Writing calendar to: {calendar_file}")
@@ -154,18 +148,39 @@ def write_calendar_to_file(rounds_dict, output_dir_path, instance_base_name):
             matches_str = ", ".join(f"{h}@{a}" for h, a in sorted_matches)
             f.write(f"Round {r_num}: {matches_str}\n")
 
+# compute_and_print_metrics is now compute_and_print_detailed_metrics - adding basic reporting
+def compute_and_print_detailed_metrics(rounds_dict, num_teams, clingo_solve_result): # Explicitly include parameter
+    """
+    Computes and prints detailed metrics for the generated schedule.
+    Also reports Clingo solver outcome information.
+    """
+    print("\n--- Solution Quality Metrics ---")
+    # Report solver status immediately
+    if clingo_solve_result.get("status") not in ["MODEL_FOUND", "TIMEOUT_WITH_MODEL", "OPTIMAL_SOLUTION_FOUND"]:
+        print("Metrics: N/A (No valid schedule data due to solver status).")
+        print(f"Solver Status: {clingo_solve_result.get('status', 'Unknown')}")
+        if "message" in clingo_solve_result and clingo_solve_result["message"]: print(f"Message: {clingo_solve_result['message']}")
+        # Add a note if rounds_dict is unexpectedly empty even with a model status
+        if clingo_solve_result.get("status") in ["MODEL_FOUND", "TIMEOUT_WITH_MODEL", "OPTIMAL_SOLUTION_FOUND"] and not rounds_dict:
+             print("[WARNING] Solver reported a model status but no schedule data was parsed.")
+        return # Exit if no valid model or schedule data was obtained
 
-# compute_and_print_metrics is now compute_and_print_detailed_metrics - placeholder for now
-def compute_and_print_detailed_metrics(rounds_dict, num_teams, clingo_solve_result):
-     """Placeholder for detailed DI metrics."""
-     print("\n--- Solution Quality Metrics (DI Placeholder) ---")
-     print(f"Solver Status: {clingo_solve_result.get('status', 'Unknown')}")
-     print(f"Clingo Cost: {clingo_solve_result.get('cost', [])}")
-     print(f"Optimality Proven: {clingo_solve_result.get('optimality_proven', False)}")
-     print("[INFO] compute_and_print_detailed_metrics called (DI placeholder)")
+    # Proceed with printing metrics only if a model/schedule was obtained
+    print(f"Clingo Optimality Proven: {clingo_solve_result.get('optimality_proven', False)}")
+    print(f"Clingo Solution Cost (by priority levels): {clingo_solve_result.get('cost', [])}")
+
+    # Placeholder for actual metric calculations
+    print("\n[INFO] Python-side metric calculations will go here.")
+    print("Hard Constraint - Team plays once per round violations: N/A")
+    print("Soft: Occurrences of exactly 2 consecutive home games: N/A")
+    print("Soft: Occurrences of exactly 2 consecutive away games: N/A")
+    print("Soft: Occurrences of 3+ consecutive home games: N/A")
+    print("Soft: Occurrences of 3+ consecutive away games: N/A")
+    print("Soft: Sum of absolute H/A imbalance over all teams: N/A")
+    print("Note: Metrics for 2-consecutive are approximate if 3+ exist; Clingo costs are the ground truth from the ASP.")
 
 
-# --- Main Execution (Modified for DI) ---
+# --- Main Execution ---
 def main():
     parser = argparse.ArgumentParser(description="Generates LZV Cup schedules using Clingo (DI Version).")
     parser.add_argument("-i", "--instances", nargs="+", required=True, help="Path to instance .lp file(s).")
@@ -192,10 +207,9 @@ def main():
         except Exception as e:
             print(f"[WARNING] Error reading n: {e}. Using default n={num_teams_for_metrics} for metrics.")
 
-        clingo_solve_result = {} # Initialize variable before the try block
+        clingo_solve_result = {} # Initialize before try block
 
         try:
-            # *** FIX: Capture the dictionary return ***
             clingo_solve_result = solve_with_api(
                 asp_model_path=Path(args.model),
                 instance_file_path=instance_file_path,
@@ -204,41 +218,34 @@ def main():
             )
 
             rounds_data = {}
-            # *** FIX: Parse schedule from the 'atoms_str' key in the result dictionary ***
-            # Only attempt parsing if the solver didn't report a critical error before finding atoms
-            if clingo_solve_result.get("status") not in ["ERROR_MODEL_NOT_FOUND", "ERROR_INSTANCE_NOT_FOUND", "ERROR_GROUNDING", "ERROR_SOLVE_RUNTIME"]:
-                 # Use get with a default empty string in case atoms_str is missing (e.g., UNSAT)
-                 rounds_data = parse_schedule_from_clingo_output(clingo_solve_result.get("atoms_str", ""))
-                 # Add a check if rounds_data is unexpectedly empty for statuses that *should* have models
-                 if not rounds_data and clingo_solve_result.get("status") in ["MODEL_FOUND", "TIMEOUT_WITH_MODEL", "OPTIMAL_SOLUTION_FOUND"]:
-                     print(f"[WARNING] Solver reported status {clingo_solve_result.get('status')} but no matches were parsed.")
-
+            # Only attempt parsing if the solver returned atoms (even if timeout/suboptimal)
+            if clingo_solve_result.get("atoms_str"): # Check if atoms_str is non-empty
+                 rounds_data = parse_schedule_from_clingo_output(clingo_solve_result["atoms_str"])
 
             # Pass rounds_data (could be empty) and the full clingo_solve_result to the metrics function
-            # *** FIX: Pass the full clingo_solve_result dictionary to metrics ***
-            compute_and_print_detailed_metrics(rounds_data, num_teams_for_metrics, clingo_solve_result)
+            compute_and_print_detailed_metrics(rounds_data, num_teams_for_metrics, clingo_solve_result) # Pass the result
 
-            # Write calendar ONLY if we successfully parsed some rounds
-            if rounds_data: # Only write if there's data
+            # Write calendar ONLY if we successfully parsed some rounds AND the solver found a model
+            if rounds_data and clingo_solve_result.get("status") in ["MODEL_FOUND", "TIMEOUT_WITH_MODEL", "OPTIMAL_SOLUTION_FOUND"]:
                  write_calendar_to_file(
                      rounds_dict=rounds_data,
                      output_dir_path=Path(args.output),
                      instance_base_name=instance_base_name
                  )
-            else:
+            elif not rounds_data:
                  print("[INFO] No schedule data to write to calendar file.")
+            # Else, if rounds_data exists but status isn't a "model found" status, we also don't write a calendar file
+            # (e.g., ERROR_GROUNDING might still produce some garbage atoms depending on model, but not a valid schedule)
 
 
         except FileNotFoundError as e:
              print(f"[ERROR] A required file was not found: {e}")
-             # Call metrics even on error
              compute_and_print_detailed_metrics({}, num_teams_for_metrics, {"status": "PYTHON_ERROR_FILE_NOT_FOUND", "message": str(e)})
         except RuntimeError as e:
             print(f"[ERROR] Clingo processing failed for {instance_file_path.name}: {e}")
             import traceback
             traceback.print_exc()
-            # clingo_solve_result should be populated by solve_with_api in this case
-            compute_and_print_detailed_metrics({}, num_teams_for_metrics, clingo_solve_result) # Pass the potentially populated result
+            compute_and_print_detailed_metrics({}, num_teams_for_metrics, clingo_solve_result)
         except Exception as e:
             print(f"[FATAL ERROR] Unhandled exception while processing {instance_file_path.name}: {e}")
             import traceback
