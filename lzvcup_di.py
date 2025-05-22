@@ -153,48 +153,63 @@ def compute_and_print_detailed_metrics(rounds_dict, num_teams, clingo_solve_resu
     Also reports Clingo solver outcome information.
     """
     print("\n--- Solution Quality Metrics ---")
-    # Report solver status immediately
     if clingo_solve_result.get("status") not in ["MODEL_FOUND", "TIMEOUT_WITH_MODEL", "OPTIMAL_SOLUTION_FOUND"]:
         print("Metrics: N/A (No valid schedule data due to solver status).")
         print(f"Solver Status: {clingo_solve_result.get('status', 'Unknown')}")
         if "message" in clingo_solve_result and clingo_solve_result["message"]: print(f"Message: {clingo_solve_result['message']}")
-        # Add a note if rounds_dict is unexpectedly empty even with a model status
         if clingo_solve_result.get("status") in ["MODEL_FOUND", "TIMEOUT_WITH_MODEL", "OPTIMAL_SOLUTION_FOUND"] and not rounds_dict:
              print("[WARNING] Solver reported a model status but no schedule data was parsed.")
-        return # Exit if no valid model or schedule data was obtained
+        return
 
-    # Proceed with printing metrics only if a model/schedule was obtained
     print(f"Clingo Optimality Proven: {clingo_solve_result.get('optimality_proven', False)}")
     print(f"Clingo Solution Cost (by priority levels): {clingo_solve_result.get('cost', [])}")
 
-    # --- Start: Implement Hard Constraint - Team plays once per round violations ---
+    # Hard Constraint - Team plays once per round violations
     violations_play_once = 0
-    # Iterate through rounds from the parsed data
     for r_num, matches_in_round in rounds_dict.items():
-        team_play_counts = {t: 0 for t in range(1, num_teams + 1)} # Initialize counts for this round
-        # Count how many times each team appears (home or away) in this round
+        team_play_counts = {t: 0 for t in range(1, num_teams + 1)}
         for h_team, a_team in matches_in_round:
-            # Ensure team IDs are within the expected range before incrementing count
             if 1 <= h_team <= num_teams: team_play_counts[h_team] += 1
             if 1 <= a_team <= num_teams: team_play_counts[a_team] += 1
-
-        # Check if any team did NOT play exactly once in this round
         for team_id in range(1, num_teams + 1):
-            # Use .get(team_id, 0) to safely access count, defaulting to 0 if team_id isn't in the round's matches
             if team_play_counts.get(team_id, 0) != 1:
-                violations_play_once += 1 # Increment total violations counter
-                # Optional: Add debug print for specific violations if needed
-                # print(f"[DEBUG Metric Violation] Team {team_id} plays {team_play_counts.get(team_id, 0)} times in round {r_num}.")
+                violations_play_once += 1
     print(f"Hard Constraint - Team plays once per round violations: {violations_play_once} instances")
-    # --- End: Implement Hard Constraint ---
+
+    # --- Start: Implement Basic Consecutive Game Counting ---
+    consecutive_home_count = 0
+    consecutive_away_count = 0
+    team_schedules_ha = {t: [] for t in range(1, num_teams + 1)} # Dictionary to store H/A sequence for each team
+
+    # Build the H/A sequence for each team across rounds
+    for r_num in sorted(rounds_dict.keys()): # Process rounds in order
+        for h_team, a_team in rounds_dict[r_num]:
+            # Append 'H' for home team, 'A' for away team
+            if 1 <= h_team <= num_teams: team_schedules_ha[h_team].append("H")
+            if 1 <= a_team <= num_teams: team_schedules_ha[a_team].append("A")
+
+    # Iterate through each team's schedule sequence and count consecutive occurrences
+    for team_id in range(1, num_teams + 1):
+        seq = team_schedules_ha.get(team_id, []) # Get the sequence, default to empty list for safety
+        for i in range(len(seq) - 1): # Iterate up to the second-to-last element
+            if seq[i] == "H" and seq[i+1] == "H":
+                consecutive_home_count += 1 # Count every pair of consecutive 'H'
+            elif seq[i] == "A" and seq[i+1] == "A":
+                consecutive_away_count += 1 # Count every pair of consecutive 'A'
+
+    # Note: This basic count counts *every* pair. A HHH sequence counts as two consecutive homes.
+    # We will refine this in a later commit to distinguish exact 2 vs 3+
+    print(f"Soft: Occurrences of 2+ consecutive home games: {consecutive_home_count}") # This counts 2+
+    print(f"Soft: Occurrences of 2+ consecutive away games: {consecutive_away_count}") # This counts 2+
+    # Placeholders for refined counts
+    print("Soft: Occurrences of exactly 2 consecutive home games: N/A (Refined counting needed)")
+    print("Soft: Occurrences of exactly 2 consecutive away games: N/A (Refined counting needed)")
+    print("Soft: Occurrences of 3+ consecutive home games: N/A (Refined counting needed)")
+    print("Soft: Occurrences of 3+ consecutive away games: N/A (Refined counting needed)")
+    # --- End: Implement Basic Consecutive Game Counting ---
 
 
-    # Placeholder for actual soft metric calculations
-    print("\n[INFO] Python-side soft metric calculations will go here.")
-    print("Soft: Occurrences of exactly 2 consecutive home games: N/A")
-    print("Soft: Occurrences of exactly 2 consecutive away games: N/A")
-    print("Soft: Occurrences of 3+ consecutive home games: N/A")
-    print("Soft: Occurrences of 3+ consecutive away games: N/A")
+    # Placeholder for H/A balance metric
     print("Soft: Sum of absolute H/A imbalance over all teams: N/A")
     print("Note: Metrics for 2-consecutive are approximate if 3+ exist; Clingo costs are the ground truth from the ASP.")
 
@@ -226,7 +241,7 @@ def main():
         except Exception as e:
             print(f"[WARNING] Error reading n: {e}. Using default n={num_teams_for_metrics} for metrics.")
 
-        clingo_solve_result = {} # Initialize before try block
+        clingo_solve_result = {}
 
         try:
             clingo_solve_result = solve_with_api(
@@ -237,15 +252,12 @@ def main():
             )
 
             rounds_data = {}
-            # Only attempt parsing if the solver returned atoms (even if timeout/suboptimal)
-            if clingo_solve_result.get("atoms_str"): # Check if atoms_str is non-empty
+            if clingo_solve_result.get("atoms_str"):
                  rounds_data = parse_schedule_from_clingo_output(clingo_solve_result["atoms_str"])
 
-            # Pass rounds_data (could be empty) and the full clingo_solve_result to the metrics function
             compute_and_print_detailed_metrics(rounds_data, num_teams_for_metrics, clingo_solve_result)
 
-            # Write calendar ONLY if we successfully parsed some rounds AND the solver found a model
-            if rounds_data and clingo_solve_result.get("status") in ["MODEL_FOUND", "TIMEOUT_WITH_MODEL", "OPTIMAL_SOLUTION_FOUND", "OPTIMAL_SOLUTION_FOUND"]: # Duplicated OPTIMAL_SOLUTION_FOUND, doesn't hurt
+            if rounds_data and clingo_solve_result.get("status") in ["MODEL_FOUND", "TIMEOUT_WITH_MODEL", "OPTIMAL_SOLUTION_FOUND"]:
                  write_calendar_to_file(
                      rounds_dict=rounds_data,
                      output_dir_path=Path(args.output),
@@ -253,7 +265,6 @@ def main():
                  )
             elif not rounds_data:
                  print("[INFO] No schedule data to write to calendar file.")
-            # Else, if rounds_data exists but status isn't a "model found" status, we also don't write a calendar file
 
 
         except FileNotFoundError as e:
