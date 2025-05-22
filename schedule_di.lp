@@ -39,7 +39,7 @@ consecutive_away_3(T,R) :- team(T), round(R), round(R+1), round(R+2),
 
 % High penalty cost (e.g., 10) at a high priority level (e.g., 3)
 #minimize { 10@3,T,R : consecutive_home_3(T,R) }.
-#minimize { 10@3@3,T,R : consecutive_away_3(T,R) }. % Corrected typo: Removed extra @3
+#minimize { 10@3,T,R : consecutive_away_3(T,R) }.
 
 
 % --- S2: Minimize (any) two consecutive home/away matches (Medium Priority) ---
@@ -55,7 +55,13 @@ consecutive_away_2(T,R) :- team(T), round(R), round(R+1),
 
 
 % --- S3: Balance overall home/away count (Lower Priority) ---
-% We will define this later.
+home_count_total(T,Count) :- Count = #count{ R : match(R,T,_) }, team(T).
+away_count_total(T,Count) :- Count = #count{ R : match(R,_,T) }, team(T).
+imbalance_total(T,AbsDiff) :- home_count_total(T,H), away_count_total(T,A),
+                              AbsDiff = |H-A|, team(T).
+
+% Penalty cost (e.g., 1) for each unit of difference, at a lower priority (e.g., 1)
+#minimize { DiffCost@1,T,AbsDiff : imbalance_total(T,AbsDiff), DiffCost = AbsDiff }.
 
 
 %–––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
