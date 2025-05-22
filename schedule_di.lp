@@ -68,3 +68,10 @@ imbalance_total(T,AbsDiff) :- home_count_total(T,H), away_count_total(T,A),
 % Output
 %–––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 #show match/3.
+
+% To see penalty atoms in Clingo's output (useful for debugging costs):
+#show consecutive_home_3/2.
+#show consecutive_away_3/2.
+#show consecutive_home_2/2.
+#show consecutive_away_2/2.
+#show imbalance_total/2.
