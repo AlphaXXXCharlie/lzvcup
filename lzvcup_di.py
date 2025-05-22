@@ -176,37 +176,48 @@ def compute_and_print_detailed_metrics(rounds_dict, num_teams, clingo_solve_resu
                 violations_play_once += 1
     print(f"Hard Constraint - Team plays once per round violations: {violations_play_once} instances")
 
-    # --- Start: Implement Basic Consecutive Game Counting ---
-    consecutive_home_count = 0
-    consecutive_away_count = 0
-    team_schedules_ha = {t: [] for t in range(1, num_teams + 1)} # Dictionary to store H/A sequence for each team
+    # --- Start: Implement Refined Consecutive Game Counting (Exact 2 and 3+) ---
+    consecutive_home_2_count_temp = 0 # Temporary count for any pair (HH, HHH...)
+    consecutive_away_2_count_temp = 0 # Temporary count for any pair (AA, AAA...)
+    consecutive_home_3_count_triplets = 0 # Count for any triplet (HHH, HHHH...)
+    consecutive_away_3_count_triplets = 0 # Count for any triplet (AAA, AAAA...)
 
-    # Build the H/A sequence for each team across rounds
-    for r_num in sorted(rounds_dict.keys()): # Process rounds in order
+    team_schedules_ha = {t: [] for t in range(1, num_teams + 1)}
+
+    for r_num in sorted(rounds_dict.keys()): # Ensure rounds are processed in order
         for h_team, a_team in rounds_dict[r_num]:
-            # Append 'H' for home team, 'A' for away team
             if 1 <= h_team <= num_teams: team_schedules_ha[h_team].append("H")
             if 1 <= a_team <= num_teams: team_schedules_ha[a_team].append("A")
 
-    # Iterate through each team's schedule sequence and count consecutive occurrences
     for team_id in range(1, num_teams + 1):
-        seq = team_schedules_ha.get(team_id, []) # Get the sequence, default to empty list for safety
-        for i in range(len(seq) - 1): # Iterate up to the second-to-last element
-            if seq[i] == "H" and seq[i+1] == "H":
-                consecutive_home_count += 1 # Count every pair of consecutive 'H'
-            elif seq[i] == "A" and seq[i+1] == "A":
-                consecutive_away_count += 1 # Count every pair of consecutive 'A'
+        seq = team_schedules_ha.get(team_id, [])
+        # Iterate through the sequence to count pairs and triplets
+        for i in range(len(seq)):
+            # Check for pairs (2+ consecutive)
+            if i + 1 < len(seq) and seq[i] == seq[i+1]:
+                if seq[i] == "H": consecutive_home_2_count_temp += 1
+                else: consecutive_away_2_count_temp += 1
+            # Check for triplets (3+ consecutive)
+            if i + 2 < len(seq) and seq[i] == seq[i+1] == seq[i+2]:
+                if seq[i] == "H": consecutive_home_3_count_triplets += 1
+                else: consecutive_away_3_count_triplets += 1
 
-    # Note: This basic count counts *every* pair. A HHH sequence counts as two consecutive homes.
-    # We will refine this in a later commit to distinguish exact 2 vs 3+
-    print(f"Soft: Occurrences of 2+ consecutive home games: {consecutive_home_count}") # This counts 2+
-    print(f"Soft: Occurrences of 2+ consecutive away games: {consecutive_away_count}") # This counts 2+
-    # Placeholders for refined counts
-    print("Soft: Occurrences of exactly 2 consecutive home games: N/A (Refined counting needed)")
-    print("Soft: Occurrences of exactly 2 consecutive away games: N/A (Refined counting needed)")
-    print("Soft: Occurrences of 3+ consecutive home games: N/A (Refined counting needed)")
-    print("Soft: Occurrences of 3+ consecutive away games: N/A (Refined counting needed)")
-    # --- End: Implement Basic Consecutive Game Counting ---
+    # Calculate the count of *exactly 2* consecutive games.
+    # A sequence of HHH contains two HH pairs. A sequence of HHHH contains three HH pairs and two HHH triplets.
+    # Total 2+ pairs = (Num exactly 2 runs * 1) + (Num 3+ runs * 2) + (Num 4+ runs * 3) + ...
+    # Total 3+ triplets = (Num 3+ runs * 1) + (Num 4+ runs * 2) + ...
+    # Num exactly 2 runs = (Total 2+ pairs counted) - 2 * (Total 3+ triplets counted)
+    consecutive_home_2_exact = consecutive_home_2_count_temp - consecutive_home_3_count_triplets * 2
+    consecutive_away_2_exact = consecutive_away_2_count_temp - consecutive_away_3_count_triplets * 2
+    # The count of 3+ consecutive runs is simply the count of triplets found.
+    consecutive_home_3_plus = consecutive_home_3_count_triplets
+    consecutive_away_3_plus = consecutive_away_3_count_triplets
+
+    print(f"Soft: Occurrences of exactly 2 consecutive home games: {consecutive_home_2_exact}")
+    print(f"Soft: Occurrences of exactly 2 consecutive away games: {consecutive_away_2_exact}")
+    print(f"Soft: Occurrences of 3+ consecutive home games: {consecutive_home_3_plus}")
+    print(f"Soft: Occurrences of 3+ consecutive away games: {consecutive_away_3_plus}")
+    # --- End: Implement Refined Consecutive Game Counting ---
 
 
     # Placeholder for H/A balance metric
@@ -241,7 +252,7 @@ def main():
         except Exception as e:
             print(f"[WARNING] Error reading n: {e}. Using default n={num_teams_for_metrics} for metrics.")
 
-        clingo_solve_result = {}
+        clingo_solve_result = {} # Initialize before try block
 
         try:
             clingo_solve_result = solve_with_api(
@@ -284,4 +295,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main()  
